@@ -1,0 +1,66 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+	id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Loom adds the essential Minecraft / Fabric repositories automatically.
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+}
+
+processResources {
+	def modProperties = [
+			"version"             : project.version,
+			"mod_id"              : project.mod_id,
+			"mod_name"            : project.mod_name,
+			"minecraft_dependency": project.minecraft_dependency,
+	]
+	inputs.properties(modProperties)
+
+	filesMatching("fabric.mod.json") {
+		expand modProperties
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = "UTF-8"
+	it.options.release = 21
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+
+	withSourcesJar()
+}
+
+jar {
+	inputs.property "archives_base_name", project.archives_base_name
+
+	from("LICENSE") {
+		rename { "${it}_${inputs.properties.archives_base_name}" }
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			from components.java
+		}
+	}
+
+	repositories {
+	}
+}

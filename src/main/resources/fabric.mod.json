@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${version}",
+
+  "name": "${mod_name}",
+  "description": "Monitors firework rocket usage. Player right-click, crossbow and dispenser launches are treated as normal; any other (command / mod / unknown) launch is reported with detailed information and written to the log.",
+  "authors": [
+    "firework_use_monitor"
+  ],
+  "license": "MIT",
+
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.fireworkmonitor.FireworkUseMonitor"
+    ]
+  },
+  "mixins": [
+    "firework_use_monitor.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "${minecraft_dependency}"
+  }
+}
