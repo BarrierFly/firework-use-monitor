@@ -19,24 +19,67 @@ import org.slf4j.LoggerFactory;
 /**
  * Watches every {@link FireworkRocketEntity} that gets created on the server.
  *
- * <p>Launches that come from a player right-clicking the firework rocket item, from a crossbow, or
- * from a dispenser are considered normal and are ignored. Everything else (commands, other mods,
- * unknown code paths) is reported with detailed information and written to the log.</p>
+ * <p>Reporting rules (see HANDOVER.md, v2):</p>
+ * <ul>
+ *   <li>{@code CROSSBOW} / {@code DISPENSER} launches are normal and silently ignored.</li>
+ *   <li>{@code NETWORK} launches (a use packet arrived, then the rocket was constructed) are the
+ *       standard "player right-clicked (or a client mod clicked for the player)" path. Depending on
+ *       {@link Mode} they are logged at INFO, reported as a warning, or silenced.</li>
+ *   <li>{@code PLAYER} means the item API ran on a server thread with <b>no</b> use packet in
+ *       flight: some server-side code (typically another mod) called it directly. Reported.</li>
+ *   <li>{@code COMMAND} ({@code /summon}) and unmarked constructions (direct entity creation) are
+ *       reported.</li>
+ *   <li>Reloading an existing rocket from save data is never a "use".</li>
+ * </ul>
  */
 public class FireworkUseMonitor implements ModInitializer
 {
 	public static final String MOD_ID = "firework_use_monitor";
 	public static final Logger LOGGER = LoggerFactory.getLogger("FireworkUseMonitor");
 
+	/** How {@code NETWORK} launches (use packets) are reported. Never affects abnormal sources. */
+	public enum Mode
+	{
+		/** Use-packet launches are logged at INFO only. */
+		QUIET,
+		/** Use-packet launches are also reported as a warning with details. */
+		NETWORK,
+		/** Every launch is reported with details. */
+		ALL
+	}
+
 	/** Maximum number of stack frames that are included in an alert. */
 	private static final int MAX_STACK_FRAMES = 20;
 
 	private static final MappingResolver MAPPING_RESOLVER = FabricLoader.getInstance().getMappingResolver();
 
+	private static volatile Mode mode = Mode.QUIET;
+
 	@Override
 	public void onInitialize()
 	{
-		LOGGER.info("Firework Use Monitor loaded");
+		String value = System.getProperty("fireworkusemonitor.mode");
+		if (value == null)
+		{
+			value = System.getenv("FIREWORKUSEMONITOR_MODE");
+		}
+		if (value != null)
+		{
+			try
+			{
+				mode = Mode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+			}
+			catch (IllegalArgumentException e)
+			{
+				LOGGER.warn("Invalid fireworkusemonitor.mode value '{}', using QUIET (valid: QUIET, NETWORK, ALL)", value);
+			}
+		}
+		LOGGER.info("Firework Use Monitor loaded (network launches: {})", mode);
+	}
+
+	public static Mode getMode()
+	{
+		return mode;
 	}
 
 	/**
@@ -51,24 +94,56 @@ public class FireworkUseMonitor implements ModInitializer
 
 		FireworkUseContext.Source source = pending.source;
 
-		// Player right-click / crossbow / dispenser are the normal, expected ways to use a rocket.
-		if (source == FireworkUseContext.Source.PLAYER
-				|| source == FireworkUseContext.Source.CROSSBOW
-				|| source == FireworkUseContext.Source.DISPENSER)
-		{
-			return;
-		}
-
 		// Re-loading an already existing rocket from a save file is not a "use".
 		if (loadedFromNbt && source != FireworkUseContext.Source.COMMAND)
 		{
 			return;
 		}
 
+		if (source == FireworkUseContext.Source.CROSSBOW || source == FireworkUseContext.Source.DISPENSER)
+		{
+			return;
+		}
+
+		// The item API ran without any use packet in flight: a server-side mod called it directly.
+		if (source == FireworkUseContext.Source.PLAYER)
+		{
+			report(level, entity, pending, loadedFromNbt, "direct item call (no use packet in flight)");
+			return;
+		}
+
+		if (source == FireworkUseContext.Source.COMMAND)
+		{
+			report(level, entity, pending, loadedFromNbt, "command /summon");
+			return;
+		}
+
+		if (source == FireworkUseContext.Source.NETWORK)
+		{
+			// A real click and a client-mod click are indistinguishable here (see HANDOVER.md).
+			if (mode == Mode.QUIET)
+			{
+				LOGGER.info("Firework rocket launched via use packet{}",
+						System.lineSeparator() + buildDetails(level, entity, pending, loadedFromNbt));
+				return;
+			}
+			report(level, entity, pending, loadedFromNbt, "use packet (player click or client mod)");
+			return;
+		}
+
+		// No marker at all: constructed outside any known path.
+		String label = pending.fromEntityType
+				? (loadedFromNbt ? "unknown (entity NBT load)" : "unknown (entity type create, e.g. plugin / mod summon)")
+				: "unknown (firework rocket spawn constructor, e.g. plugin / mod)";
+		report(level, entity, pending, loadedFromNbt, label);
+	}
+
+	private static void report(ServerLevel level, FireworkRocketEntity entity, PendingSpawn pending, boolean loadedFromNbt, String label)
+	{
 		String details = buildDetails(level, entity, pending, loadedFromNbt);
 
 		LOGGER.warn("Abnormal firework rocket launch detected ({}).{}",
-				sourceLabel(pending.source, pending.fromEntityType, loadedFromNbt),
+				label,
 				System.lineSeparator() + details);
 
 		ServerPlayer target = resolveTarget(pending);
@@ -76,8 +151,7 @@ public class FireworkUseMonitor implements ModInitializer
 		{
 			// Client-side-only chat message: only the involved player sees it, it is not broadcast.
 			target.sendSystemMessage(Component.literal(
-					"[FireworkUseMonitor] Abnormal firework rocket launch (" +
-							sourceLabel(pending.source, pending.fromEntityType, loadedFromNbt) + "):\n" + details));
+					"[FireworkUseMonitor] Abnormal firework rocket launch (" + label + "):\n" + details));
 		}
 	}
 
@@ -133,6 +207,14 @@ public class FireworkUseMonitor implements ModInitializer
 		{
 			return "command /summon";
 		}
+		if (source == FireworkUseContext.Source.NETWORK)
+		{
+			return "use packet (player click or client mod)";
+		}
+		if (source == FireworkUseContext.Source.PLAYER)
+		{
+			return "direct item call (no use packet in flight)";
+		}
 		if (source != null)
 		{
 			return source.name().toLowerCase();
@@ -157,6 +239,42 @@ public class FireworkUseMonitor implements ModInitializer
 			return player;
 		}
 		return null;
+	}
+
+	/**
+	 * Client-side observation result for one item use (see ClientUseObserver).
+	 */
+	public static final class ClientUseInfo
+	{
+		/** True if the use was initiated by physical input (mouse right button or the use key). */
+		public final boolean physicalInput;
+		/** First client call stack frame that belongs to a mod, or null. */
+		public final String modFrame;
+
+		public ClientUseInfo(boolean physicalInput, String modFrame)
+		{
+			this.physicalInput = physicalInput;
+			this.modFrame = modFrame;
+		}
+	}
+
+	/**
+	 * Called by the client observer when a <b>programmatic</b> (non-physical-input) firework
+	 * rocket use was detected on the client. Logs it and returns the user-facing message (the
+	 * caller displays it; this class must stay free of client-only class references so it stays
+	 * dedicated-server safe).
+	 */
+	public static String handleClientUse(ItemStack stack, ClientUseInfo info)
+	{
+		String detail = "Unknown client code initiated a firework rocket use (not a mouse click or use key press).";
+		if (info.modFrame != null)
+		{
+			detail = "Client code that initiated the firework rocket use:\n  " + info.modFrame;
+		}
+		String message = "[FireworkUseMonitor] Programmatic firework rocket use detected (" + itemId(stack) + ")\n" + detail;
+
+		LOGGER.warn("{}", message);
+		return message;
 	}
 
 	private static String itemId(ItemStack stack)
@@ -208,6 +326,7 @@ public class FireworkUseMonitor implements ModInitializer
 	private static boolean isNoise(String className)
 	{
 		return className.startsWith("java.")
+				|| className.startsWith("javax.")
 				|| className.startsWith("jdk.")
 				|| className.startsWith("sun.")
 				|| className.startsWith("com.sun.")

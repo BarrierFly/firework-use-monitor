@@ -28,7 +28,8 @@ public abstract class SummonCommandMixin
 	{
 		if (type.value() == EntityType.FIREWORK_ROCKET)
 		{
-			FireworkUseContext.push(FireworkUseContext.Source.COMMAND, source.getPlayer(), null, BlockPos.containing(pos));
+			FireworkUseContext.push(FireworkUseContext.Source.COMMAND, source.getPlayer(), null, BlockPos.containing(pos), null,
+					FireworkUseContext.currentTick(source.getLevel()));
 		}
 	}
 

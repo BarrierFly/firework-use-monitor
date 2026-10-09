@@ -16,6 +16,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Captures how a firework rocket was created and reports abnormal launches on the first tick.
+ *
+ * <p>Freshness is checked once, at construction: the marker in {@link FireworkUseContext} is
+ * always pushed on the same thread, synchronously in the same server tick as the construction
+ * (packet handler -> game mode -> item -> {@code new FireworkRocketEntity}), so a legitimate
+ * marker always matches the tick that is current at the constructor's RETURN. A marker left over
+ * from an earlier tick (aborted use) fails that check and is treated as "unmarked". The snapshot
+ * consumed here is then reported on the first tick whenever that happens — no tick-time freshness
+ * check, otherwise a first tick on the tick after construction would suppress every report.</p>
  */
 @Mixin(FireworkRocketEntity.class)
 public abstract class FireworkRocketEntityMixin
@@ -69,14 +77,19 @@ public abstract class FireworkRocketEntityMixin
 	@Unique
 	private void fum$capture(Level level, boolean fromEntityType)
 	{
-		if (!(level instanceof ServerLevel))
+		if (!(level instanceof ServerLevel serverLevel))
 		{
-			// Client side prediction, or construction outside of a live server level: nothing to do.
+			// Client-side prediction, or construction outside of a live server level: nothing to do.
 			FireworkUseContext.clear();
 			return;
 		}
 
 		FireworkUseContext ctx = FireworkUseContext.current();
+		if (ctx != null && !ctx.isCurrent(FireworkUseContext.currentTick(serverLevel)))
+		{
+			// Leftover from an earlier tick (e.g. an aborted use): not a description of this spawn.
+			ctx = null;
+		}
 		FireworkUseContext.Source source = ctx != null ? ctx.source : null;
 
 		FireworkUseMonitor.PendingSpawn pending = new FireworkUseMonitor.PendingSpawn(
@@ -86,10 +99,11 @@ public abstract class FireworkRocketEntityMixin
 				ctx != null ? ctx.shooter : null
 		);
 
-		boolean normal = source == FireworkUseContext.Source.PLAYER
-				|| source == FireworkUseContext.Source.CROSSBOW
-				|| source == FireworkUseContext.Source.DISPENSER;
-		if (!normal)
+		// Call stacks are only useful for the sources that can be reported. A use packet's server
+		// stack is always the packet-handler chain and identifies nothing, so NETWORK skips it.
+		if (source != FireworkUseContext.Source.CROSSBOW
+				&& source != FireworkUseContext.Source.DISPENSER
+				&& source != FireworkUseContext.Source.NETWORK)
 		{
 			pending.stackTrace = new Throwable().getStackTrace();
 		}

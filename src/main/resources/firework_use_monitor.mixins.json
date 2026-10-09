@@ -4,12 +4,10 @@
   "package": "com.fireworkmonitor.mixins",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "CrossbowItemMixin",
-    "FireworkRocketEntityMixin",
-    "FireworkRocketItemMixin",
-    "SummonCommandMixin"
   ],
   "client": [
+    "client.ClientGameModeMixin",
+    "client.ClientMinecraftTickMixin"
   ],
   "injectors": {
     "defaultRequire": 1

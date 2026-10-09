@@ -1,6 +1,7 @@
 package com.fireworkmonitor.mixins;
 
 import com.fireworkmonitor.FireworkUseContext;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -25,7 +26,8 @@ public abstract class CrossbowItemMixin
 	private void fum$onCreateProjectile(Level level, LivingEntity shooter, ItemStack weapon, ItemStack ammo, boolean isCrit, CallbackInfoReturnable<Projectile> cir)
 	{
 		Player player = shooter instanceof Player p ? p : null;
-		FireworkUseContext.push(FireworkUseContext.Source.CROSSBOW, player, shooter, null);
+		FireworkUseContext.push(FireworkUseContext.Source.CROSSBOW, player, shooter, null, null,
+				level instanceof ServerLevel serverLevel ? FireworkUseContext.currentTick(serverLevel) : -1);
 	}
 
 	@Inject(
