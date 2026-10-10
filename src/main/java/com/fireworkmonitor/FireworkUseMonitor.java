@@ -250,11 +250,14 @@ public class FireworkUseMonitor implements ModInitializer
 		public final boolean physicalInput;
 		/** First client call stack frame that belongs to a mod, or null. */
 		public final String modFrame;
+		/** Client frame counter value (incremented every {@code Minecraft.tick}) at detection time. */
+		public final long clientFrame;
 
-		public ClientUseInfo(boolean physicalInput, String modFrame)
+		public ClientUseInfo(boolean physicalInput, String modFrame, long clientFrame)
 		{
 			this.physicalInput = physicalInput;
 			this.modFrame = modFrame;
+			this.clientFrame = clientFrame;
 		}
 	}
 
@@ -266,12 +269,16 @@ public class FireworkUseMonitor implements ModInitializer
 	 */
 	public static String handleClientUse(ItemStack stack, ClientUseInfo info)
 	{
-		String detail = "Unknown client code initiated a firework rocket use (not a mouse click or use key press).";
+		StringBuilder detail = new StringBuilder();
 		if (info.modFrame != null)
 		{
-			detail = "Client code that initiated the firework rocket use:\n  " + info.modFrame;
+			detail.append("Client code that initiated the firework rocket use:\n  ").append(info.modFrame);
 		}
-		String message = "[FireworkUseMonitor] Programmatic firework rocket use detected (" + itemId(stack) + ")\n" + detail;
+		detail.append("\nclient frame: ").append(info.clientFrame);
+
+		String summary = "[FireworkUseMonitor] Programmatic firework rocket use detected ("
+				+ itemId(stack) + ", client frame " + info.clientFrame + ")";
+		String message = summary + "\n" + detail;
 
 		LOGGER.warn("{}", message);
 		return message;
